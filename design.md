@@ -168,35 +168,48 @@ The following matrix maps every system component to the test types that apply to
 ## 3. Test Objectives Summary
 
 ```mermaid
-mindmap
-  root((Test Plan))
-    Unit Tests
-      Algorithm A logic
-      Algorithm B logic
-      DataWriter serialization
-      REST API handlers
-      Schema validation
-    Integration Tests
-      Sensor to RabbitMQ
-      RabbitMQ to Algo A
-      Algo A to Algo B pipeline
-      DataWriter to DB
-      REST API real-time
-      REST API historical
-      End-to-end pipeline
-    Load & Performance
-      Queue throughput
-      Algo pod scalability
-      DB write throughput
-      API concurrent users
-      Queue depth under load
-    Security
-      API authentication
-      TLS enforcement
-      Input validation
-      SQL injection
-      Rate limiting
-      K8s network policy
+flowchart LR
+    TP(["🗂 Test Plan"])
+
+    subgraph UT ["Unit Tests"]
+        UA["Algorithm A logic"]
+        UB["Algorithm B logic"]
+        UD["DataWriter serialization"]
+        UR["REST API handlers"]
+        US["Schema validation"]
+    end
+
+    subgraph IT ["Integration Tests"]
+        IS["Sensor → RabbitMQ"]
+        IA["RabbitMQ → Algo A"]
+        IAB["Algo A → Algo B pipeline"]
+        ID["DataWriter → DB"]
+        IR["REST API real-time"]
+        IH["REST API historical"]
+        IE["End-to-end pipeline"]
+    end
+
+    subgraph LP ["Load & Performance"]
+        LQ["Queue throughput"]
+        LS["Algo pod scalability"]
+        LD["DB write throughput"]
+        LA["API concurrent users"]
+        LQD["Queue depth under load"]
+    end
+
+    subgraph ST ["Security"]
+        SA["API authentication"]
+        TL["TLS enforcement"]
+        IV["Input validation"]
+        SI["SQL injection"]
+        RL["Rate limiting"]
+        KN["K8s network policy"]
+    end
+
+    TP --> UT
+    TP --> IT
+    TP --> LP
+    TP --> ST
 ```
 
 ---
