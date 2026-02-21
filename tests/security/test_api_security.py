@@ -184,13 +184,29 @@ class TestRateLimiting:
 
     async def test_requests_exceeding_limit_receive_429(self, client):
         """
-        RATE_LIMIT_MAX is 100 requests per 60 s.
-        Sending 110 requests from the same client must trigger at least one 429.
+        RATE_LIMIT_MAX is 100 requests per 60s.
+        Exactly 100 requests must succeed, then all subsequent must be blocked.
         """
         statuses = [
-            client.get("/features/realtime", headers=_VALID_HEADERS).status_code for _ in range(110)
+            client.get("/features/realtime", headers=_VALID_HEADERS).status_code
+            for _ in range(110)
         ]
-        assert 429 in statuses, "Rate limiting was not enforced after 110 requests"
+
+        successes = statuses.count(200)
+        rate_limited = statuses.count(429)
+
+        assert successes == 100, (
+            f"Expected exactly 100 successful requests before rate limiting, got {successes}"
+        )
+        assert rate_limited == 10, (
+            f"Expected 10 rate-limited (429) responses, got {rate_limited}"
+        )
+        # Verify the 429s come AFTER the 200s (not scattered randomly)
+        first_429_index = next(i for i, s in enumerate(statuses) if s == 429)
+        assert first_429_index == 100, (
+            f"First 429 should be at index 100, got index {first_429_index} "
+            "— rate limiter fired too early or too late"
+        )
 
     async def test_rate_limit_response_body_describes_error(self, client):
         for _ in range(110):

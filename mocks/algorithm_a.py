@@ -96,8 +96,28 @@ class AlgorithmA:
         return feature_a
 
     async def process_all(self) -> int:
-        """Drain the audio queue completely. Returns the number of messages processed."""
+        """
+        Drain the audio queue completely.
+        Invalid messages are logged and skipped — processing continues.
+        Returns the number of messages successfully processed.
+        """
         count = 0
-        while await self.process_one() is not None:
-            count += 1
+        skipped = 0
+        while True:
+            try:
+                result = await self.process_one()
+                if result is None:
+                    break
+                count += 1
+            except ValueError as exc:
+                skipped += 1
+                logger.warning(
+                    "AlgoA skipped invalid message (skipped=%d so far): %s",
+                    skipped, exc,
+                )
+        if skipped:
+            logger.error(
+                "AlgoA finished with %d skipped invalid message(s) out of %d total",
+                skipped, count + skipped,
+            )
         return count

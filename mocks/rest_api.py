@@ -19,6 +19,7 @@ per-client rate limit.
 import asyncio
 import logging
 import os
+import threading
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
@@ -66,6 +67,7 @@ def create_app(broker: InMemoryBroker, db: Optional[List[dict]] = None) -> Flask
 
     # Rate limiter: client_ip -> list of request datetimes within the window
     _rate_tracker: dict = {}
+    _rate_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -111,17 +113,18 @@ def create_app(broker: InMemoryBroker, db: Optional[List[dict]] = None) -> Flask
         now = datetime.now(timezone.utc)
         window_start = now - timedelta(seconds=RATE_LIMIT_WINDOW_SECONDS)
 
-        history = _rate_tracker.get(client, [])
-        history = [t for t in history if t > window_start]
+        with _rate_lock:
+            history = _rate_tracker.get(client, [])
+            history = [t for t in history if t > window_start]
 
-        if len(history) >= RATE_LIMIT_MAX:
+            if len(history) >= RATE_LIMIT_MAX:
+                _rate_tracker[client] = history
+                logger.warning("Rate limit exceeded ip=%s requests=%d", client, len(history))
+                return False
+
+            history.append(now)
             _rate_tracker[client] = history
-            logger.warning("Rate limit exceeded ip=%s requests=%d", client, len(history))
-            return False
-
-        history.append(now)
-        _rate_tracker[client] = history
-        return True
+            return True
 
     # ------------------------------------------------------------------
     # Routes

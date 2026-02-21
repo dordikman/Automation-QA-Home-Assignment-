@@ -23,6 +23,22 @@ SLA targets (in-memory baseline; real services use the same thresholds):
   DataWriter flush rate              : ≥ 50 features / second
   REST API p99 (both endpoints)      : ≤ 500 ms
   Message loss under burst           : 0 (zero tolerance)
+
+NOTE — In-memory vs real-service SLA interpretation
+----------------------------------------------------
+All tests in this module run against the InMemoryBroker (Python queue.Queue)
+and an in-memory DataWriter (Python list). The SLA thresholds defined here
+(e.g., ≥ 100 msg/sec, p99 ≤ 2000ms) are therefore conservative baselines
+that the in-memory implementation must comfortably exceed.
+
+Real-world SLA validation against actual RabbitMQ and PostgreSQL infrastructure
+is the responsibility of the Locust load tests (tests/load/test_load.py),
+which require a running mock server (python run_mock_server.py) and measure
+true network + I/O latency.
+
+The in-memory tests serve as a regression guard: if they start failing the SLA,
+it indicates a significant algorithmic regression in the processing logic itself,
+independent of infrastructure.
 """
 
 import asyncio
@@ -420,8 +436,11 @@ class TestRestApiResponseTime:
             day = (i % 28) + 1
             hour = i % 24
             ts = f"2024-01-{day:02d}T{hour:02d}:00:00+00:00"
-            pipeline.writer.db.append(make_feature_a_message(timestamp=ts))
-            pipeline.writer.db.append(make_feature_b_message(timestamp=ts))
+            # NEW — use internal _write() which enforces idempotency and lock
+            # Direct _write() is acceptable here because we are testing API latency,
+            # not DataWriter correctness. This is intentional state setup for load testing.
+            pipeline.writer._write(make_feature_a_message(timestamp=ts))
+            pipeline.writer._write(make_feature_b_message(timestamp=ts))
 
         assert len(pipeline.writer.db) == records_per_type * 2
 
