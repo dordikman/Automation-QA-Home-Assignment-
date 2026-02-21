@@ -43,6 +43,20 @@ flowchart LR
     API -->|HTTPS| UI
 ```
 
+### Key Architectural Risks from a QA Perspective
+
+The distributed nature of the pipeline introduces failure modes that are invisible to any single component's unit tests. The table below maps each risk to the component responsible and the test type that specifically catches it.
+
+| Risk | Component | Potential Failure Mode | Test Type That Catches It |
+|---|---|---|---|
+| Message loss during broker restart | RabbitMQ | Unacknowledged messages dropped | Integration (real) |
+| Silent schema drift between AlgoA output and AlgoB input | AlgoA/B boundary | TypeError at runtime, data loss | Contract tests |
+| Duplicate feature writes under at-least-once delivery | DataWriter | Inflated DB record count | Unit (idempotency) |
+| Queue backpressure when sensors burst | Audio Stream queue | Queue grows unboundedly, OOM | Load tests |
+| Unauthenticated access to historical features | REST API | Data exfiltration | Security tests |
+| Real-time cache serving stale data | REST API cache | Features older than X minutes returned | Integration tests |
+| Pod crash mid-processing leaves message unacknowledged | AlgoA/B pods | Message redelivered and double-processed | Chaos tests |
+
 ---
 
 ## 1. Types of Tests
@@ -60,6 +74,20 @@ Unit tests are the fastest feedback loop in the test pyramid. They verify that e
 - Edge cases (empty audio, malformed JSON, null fields) are handled without exceptions
 - Output schemas (Feature A, Feature B) conform to their specifications
 - No regressions on algorithm logic after code changes
+
+**Test Isolation Strategy:**
+All unit tests use the `InMemoryBroker` adapter, which implements the exact same interface as the real RabbitMQ broker (`RealBroker`). This allows every component — Algorithm A, Algorithm B, DataWriter, and the Sensor — to be tested in complete isolation without any network calls, Docker containers, or external processes running. Swapping the broker implementation is the Adapter Pattern applied directly to testability: the production code never changes, only the injected dependency does.
+
+#### Unit Test Coverage Targets
+
+| Module | Target Coverage | Current Test Count | Key Scenarios |
+|---|:---:|:---:|---|
+| `mocks/algorithm_a.py` | ≥ 90% | 23 tests | Valid input, missing fields, empty audio, invalid timestamp, deterministic output, broker interaction |
+| `mocks/algorithm_b.py` | ≥ 90% | 23 tests | Valid Feature A input, wrong feature type, missing fields, fanout publish |
+| `mocks/data_writer.py` | ≥ 85% | 16 tests | `flush()` correctness, idempotency, query filters (type / sensor / time range) |
+| `mocks/rest_api.py` | ≥ 85% | 22 tests | Auth, realtime cache, historical range, error handling |
+| `mocks/sensor.py` | ≥ 80% | 10 tests | `sensor_id` generation, message schema, base64 encoding, queue depth |
+| `mocks/rabbitmq.py` | ≥ 85% | 12 tests | Work queue depth, fanout subscriber count, `purge_all`, timeout consume |
 
 ---
 
@@ -79,9 +107,106 @@ Each component may work correctly in isolation but fail when combined — due to
 - REST API `/features/historical` returns correct data from the DB for the queried time range
 - End-to-end: a sensor message results in queryable features from the REST API
 
+**Component Contract Boundaries:**
+
+Each arrow in the pipeline represents a contract — a promise about message shape that the producer must honour and the consumer must be able to rely on. A silent violation at any boundary causes data loss or runtime errors with no helpful error message.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     Pipeline Contract Boundaries                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+  [Sensor]                [AlgorithmA]              [AlgorithmB]
+     │                        │                          │
+     │  ① Audio Message       │  ② Feature A Message     │  ③ Feature B Message
+     │  ─────────────────►    │  ──────────────────►     │  ──────────────────►
+     │  {                     │  {                        │  {
+     │    message_id,         │    message_id,            │    message_id,
+     │    sensor_id,          │    source_message_id,     │    source_message_id,
+     │    timestamp,          │    feature_type: "A",     │    feature_type: "B",
+     │    audio_data (b64)    │    sensor_id,             │    sensor_id,
+     │  }                     │    timestamp,             │    timestamp,
+     │                        │    processed_at,          │    processed_at,
+     │                        │    features: {            │    features: {
+     │                        │      mfcc[13],            │      classification,
+     │                        │      spectral_centroid,   │      confidence,
+     │                        │      zero_crossing_rate,  │      derived_metrics
+     │                        │      rms_energy           │    }
+     │                        │    }                      │  }
+     │                        │  }                        │
+     │                        │                          [DataWriter / DB]
+     │                        │                               │
+     │                        │      ④ DB Record              │
+     │                        │  ────────────────────────────►│
+     │                        │  Row: all Feature A/B fields  │
+     │                        │  preserved with full fidelity │
+     └────────────────────────┴───────────────────────────────┘
+
+  Contract tests (tests/contract/) verify each of these 4 boundaries automatically.
+```
+
+**In-Memory vs. Real-Service Integration:**
+
+| Test scope | Infrastructure | Location | When it runs |
+|---|---|---|---|
+| In-memory pipeline (all stages wired) | `InMemoryBroker` only — no Docker | `tests/integration/` | Every PR, < 5 s |
+| Real AMQP + PostgreSQL | Docker Compose / GitHub Actions service containers | `tests/integration_real/` | Every PR (CI services job) |
+
 ---
 
-### 1.3 Load & Performance Tests
+### 1.3 Contract Tests
+
+**What is being tested?**
+The exact message schema produced at each pipeline boundary. Unlike integration tests (which verify behaviour), contract tests verify the *shape* of every message — field presence, types, value constraints, and lineage (e.g. `sensor_id` must be identical from the original audio message all the way through to the final DB record).
+
+**Why is it important?**
+In a distributed system with independently deployed services, a schema change in Algorithm A's output that is not reflected in Algorithm B's parser causes a silent `TypeError` or `KeyError` at runtime — not at deploy time. Contract tests provide a safety net that is checked on every commit, catching these regressions instantly.
+
+**Contract test classes (`tests/contract/test_message_contracts.py`):**
+
+| Class | Boundary tested | Test count |
+|---|---|---|
+| `TestAudioMessageContract` | Sensor → AlgorithmA | 4 tests |
+| `TestFeatureAContract` | AlgorithmA → AlgorithmB | 7 tests |
+| `TestFeatureBContract` | AlgorithmB → DataWriter / REST API | 6 tests |
+| `TestDataWriterDatabaseContract` | DataWriter → DB read/write roundtrip | 5 tests |
+
+**Expected outcomes:**
+- All required fields are present in every outbound message
+- `feature_type` is exactly `"A"` or `"B"` at each stage
+- MFCC list is always exactly 13 coefficients
+- `sensor_id` lineage is preserved end-to-end (Sensor → AlgoA → AlgoB → DB)
+- Nested `features` dicts survive a DB write→query roundtrip with identical content
+- Timestamps are valid ISO-8601 strings throughout the pipeline
+
+---
+
+### 1.4 Chaos / Resilience Tests
+
+**What is being tested?**
+System behaviour under deliberately introduced failure conditions: malformed messages, duplicate delivery, concurrent writes, mid-processing queue purges, and zero-subscriber fanout publishes. The goal is to verify *graceful degradation* — the system must never silently corrupt data or crash the caller.
+
+**Why is it important?**
+At-least-once delivery guarantees from RabbitMQ mean duplicates will arrive. Sensor firmware bugs will produce malformed messages. Pod crashes mid-processing are a normal Kubernetes event. Chaos tests ensure the system handles all of these without data loss or a cascading failure.
+
+**Chaos test classes (`tests/chaos/test_resilience.py`):**
+
+| Class | Failure mode simulated | Test count |
+|---|---|---|
+| `TestBrokerResilienceUnderMalformedMessages` | Missing fields, wrong `feature_type`, empty dict write | 3 tests |
+| `TestDataWriterIdempotencyUnderStress` | 100× duplicate delivery, 5 concurrent `flush()` calls, 50 flush cycles | 3 tests |
+| `TestQueueBehaviourUnderEdgeCases` | Empty queue, mid-flight `purge_all()`, zero-subscriber fanout | 3 tests |
+
+**Expected outcomes:**
+- A malformed message in the queue does not prevent subsequent valid messages from being processed
+- Idempotency holds under 100 duplicate deliveries: exactly 1 DB record
+- Concurrent `flush()` calls do not create duplicate DB records
+- `process_all()` on an empty broker returns 0 without raising
+- Broker is fully functional after `purge_all()` — publish and consume still work
+
+---
+
+### 1.5 Load & Performance Tests
 
 **What is being tested?**
 System behaviour under realistic and peak-load conditions:
@@ -101,9 +226,20 @@ The pipeline is inherently asynchronous and distributed. Under load, queues can 
 - DataWriter does not drop messages under burst load; the DB eventually becomes consistent
 - No memory leaks or resource exhaustion observed over sustained test runs
 
+**SLA Thresholds (in-memory baseline):**
+
+| Metric | SLA threshold | Measured by |
+|---|---|---|
+| AlgorithmA single-pod throughput | ≥ 100 messages / second | `TestAudioQueueThroughput` |
+| End-to-end pipeline latency p99 | ≤ 2 000 ms | `TestEndToEndPipelineLatency` |
+| DataWriter flush rate | ≥ 50 features / second | `TestDataWriterThroughput` |
+| REST API p99 (both endpoints) | ≤ 500 ms | `TestRestApiResponseTime` |
+| Message loss under burst | 0 (zero tolerance) | `TestQueueBackpressure` |
+| Multi-pod deduplication correctness | 0 duplicate DB records | `TestMultiPodScalability` |
+
 ---
 
-### 1.4 Security Tests
+### 1.6 Security Tests
 
 **What is being tested?**
 - Authentication and authorization on all REST API endpoints
@@ -128,11 +264,13 @@ The system receives data from distributed sensors over a network and exposes res
 
 ---
 
-### 1.5 Manual vs. Automated Tests
+### 1.7 Manual vs. Automated Tests
 
 | Category | Approach | Rationale |
 |---|---|---|
 | Unit tests | Fully automated | Run on every commit; fast, deterministic |
+| Contract tests | Fully automated | Run on every PR; zero-infrastructure, < 2 s |
+| Chaos / resilience tests | Fully automated | Run on every PR; in-memory, no Docker required |
 | Integration tests | Fully automated | Run on every PR; require infrastructure but scripted |
 | Load & performance | Automated (scheduled) | Run nightly or pre-release; requires dedicated environment |
 | Security — SAST/DAST | Automated (CI pipeline) | Tools like Bandit, OWASP ZAP run without human input |
@@ -147,21 +285,23 @@ The system receives data from distributed sensors over a network and exposes res
 
 The following matrix maps every system component to the test types that apply to it.
 
-| Component | Unit | Integration | Load | Security |
-|---|:---:|:---:|:---:|:---:|
-| Sensor — message formatting & transmission | ✓ | ✓ | ✓ | ✓ |
-| RabbitMQ — queue configuration & bindings | — | ✓ | ✓ | ✓ |
-| Algorithm A pods — audio processing logic | ✓ | ✓ | ✓ | — |
-| Algorithm A — output schema (Feature A) | ✓ | ✓ | — | — |
-| Algorithm B pods — feature processing logic | ✓ | ✓ | ✓ | — |
-| Algorithm B — output schema (Feature B) | ✓ | ✓ | — | — |
-| DataWriter — async write & error handling | ✓ | ✓ | ✓ | ✓ |
-| Database — schema, queries, consistency | ✓ | ✓ | ✓ | ✓ |
-| REST API — real-time endpoint | ✓ | ✓ | ✓ | ✓ |
-| REST API — historical endpoint | ✓ | ✓ | ✓ | ✓ |
-| REST API — authentication & authorization | ✓ | ✓ | — | ✓ |
-| External client access (HTTPS, internet) | — | ✓ | ✓ | ✓ |
-| Kubernetes network policies | — | ✓ | — | ✓ |
+| Component | Unit | Integration | Contract | Chaos | Load | Security |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Sensor — message formatting & transmission | ✓ | ✓ | ✓ | — | ✓ | ✓ |
+| RabbitMQ — queue configuration & bindings | — | ✓ | — | ✓ | ✓ | ✓ |
+| Algorithm A pods — audio processing logic | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Algorithm A — output schema (Feature A) | ✓ | ✓ | ✓ | — | — | — |
+| Algorithm B pods — feature processing logic | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Algorithm B — output schema (Feature B) | ✓ | ✓ | ✓ | — | — | — |
+| DataWriter — async write & error handling | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Database — schema, queries, consistency | ✓ | ✓ | ✓ | — | ✓ | ✓ |
+| REST API — real-time endpoint | ✓ | ✓ | — | — | ✓ | ✓ |
+| REST API — historical endpoint | ✓ | ✓ | — | — | ✓ | ✓ |
+| REST API — authentication & authorization | ✓ | ✓ | — | — | — | ✓ |
+| External client access (HTTPS, internet) | — | ✓ | — | — | ✓ | ✓ |
+| Kubernetes network policies | — | ✓ | — | — | — | ✓ |
+| Message idempotency / deduplication | ✓ | ✓ | — | ✓ | ✓ | — |
+| Broker fanout delivery semantics | — | ✓ | ✓ | ✓ | — | — |
 
 ---
 
@@ -177,6 +317,19 @@ flowchart LR
         UD["DataWriter serialization"]
         UR["REST API handlers"]
         US["Schema validation"]
+    end
+
+    subgraph CT ["Contract Tests"]
+        C1["Sensor → AlgoA boundary"]
+        C2["AlgoA → AlgoB boundary"]
+        C3["AlgoB → DataWriter boundary"]
+        C4["DB read/write roundtrip"]
+    end
+
+    subgraph CH ["Chaos Tests"]
+        CH1["Malformed message resilience"]
+        CH2["Idempotency under stress"]
+        CH3["Queue edge cases"]
     end
 
     subgraph IT ["Integration Tests"]
@@ -207,6 +360,8 @@ flowchart LR
     end
 
     TP --> UT
+    TP --> CT
+    TP --> CH
     TP --> IT
     TP --> LP
     TP --> ST
@@ -225,20 +380,27 @@ flowchart LR
 | HTTP testing | `pytest` + `requests` / Flask test client | REST API endpoint tests |
 | RabbitMQ | `pika` | Integration tests with a real or containerised broker |
 | Load testing | `Locust` | Simulate concurrent API clients and sensor publishers |
+| Load testing (pipeline) | `pytest` throughput suite | In-process SLA-gated throughput, latency, backpressure tests |
 | Security scanning | `Bandit` | Static analysis for Python security issues |
 | API security | `OWASP ZAP` (CLI mode) | DAST against the REST API |
 | Schema validation | `jsonschema` | Validate Feature A/B message schemas |
+| Contract testing | `pytest` + custom assertions | Verify message schema at every pipeline boundary |
+| Chaos testing | `pytest` + direct broker manipulation | Inject failures and verify graceful degradation |
 | Mocking | `unittest.mock` / `pytest-mock` | Isolate dependencies in unit tests |
 | Coverage | `pytest-cov` | Enforce minimum code coverage thresholds |
 | Reporting | `pytest-html` / `allure-pytest` | Human-readable test reports |
 | Containerisation | `Docker` + `docker-compose` | Spin up RabbitMQ, DB for local integration tests |
+| Formatting | `black` | Enforce consistent code style across all files |
+| Linting | `flake8` | Catch unused imports, undefined names, style violations |
 
 ---
 
 ### 4.2 Which Tests to Automate
 
 **Automate fully:**
-- All unit tests (run on every commit, < 30 seconds total)
+- All unit tests (run on every commit, < 5 seconds total)
+- All contract tests (run on every commit, zero infrastructure required)
+- All chaos / resilience tests (run on every PR, in-memory broker, no Docker)
 - All integration tests (run on every PR, using Docker Compose for dependencies)
 - Schema validation tests (run on every commit)
 - Load tests (run nightly in a dedicated environment)
@@ -293,6 +455,31 @@ The scenarios below describe what each test category covers. Runnable implementa
 | Missing authentication | No `Authorization` header | `401 Unauthorized` |
 | Invalid token | Expired or malformed token | `403 Forbidden` |
 
+#### Contract Tests — pipeline boundaries
+
+| Scenario | Boundary | Assertion |
+|---|---|---|
+| Sensor output satisfies AlgoA required fields | ① Sensor → AlgoA | `{"message_id", "sensor_id", "timestamp", "audio_data"}` all present |
+| Sensor audio_data is valid base64 | ① Sensor → AlgoA | `base64.b64decode()` succeeds without error |
+| AlgoA output satisfies AlgoB required fields | ② AlgoA → AlgoB | All 7 required Feature A fields present |
+| Feature A MFCC list has exactly 13 coefficients | ② AlgoA → AlgoB | `len(features["mfcc"]) == 13` |
+| AlgoB output satisfies DataWriter required fields | ③ AlgoB → DataWriter | All 7 required Feature B fields present |
+| Feature B classification is a known value | ③ AlgoB → DataWriter | `classification in {"speech","music","noise","silence","mixed"}` |
+| `sensor_id` lineage preserved end-to-end | ①②③ | Same `sensor_id` from audio → Feature A → Feature B → DB |
+| Features dict survives DB write/query roundtrip | ④ DataWriter → DB | `written_record["features"] == original_features` |
+
+#### Chaos Tests — failure mode scenarios
+
+| Scenario | Failure injected | Expected outcome |
+|---|---|---|
+| Malformed message in queue | Dict missing `audio_data` and `timestamp` | ValueError caught; next 2 valid messages processed (successes == 2) |
+| Wrong feature type in fanout | `feature_type="B"` message on `features_a` topic | TypeError caught; next 2 valid Feature A messages processed |
+| Empty dict written directly to DataWriter | `data_writer._write({})` | Exception caught or silently skipped; existing DB records untouched |
+| 100× duplicate delivery | Same `message_id` published 100 times | Exactly 1 DB record after flush |
+| 5 concurrent flush calls | `asyncio.gather(*[flush() for _ in range(5)])` | Exactly 10 DB records — no double-writes |
+| `purge_all()` mid-processing | Purge after processing 2 of 5 messages | Queue depth = 0; broker still fully usable afterwards |
+| Fanout publish with zero subscribers | `publish_fanout(FEATURES_A, msg)` before any `subscribe_fanout()` | Completes silently; subsequent subscribe + publish works correctly |
+
 #### Integration Tests — pipeline
 
 | Scenario | Steps | Expected outcome |
@@ -342,15 +529,20 @@ flowchart TD
 
     LINT & SAST & UNIT & SCHEMA --> GATE1{All pass?}
     GATE1 -->|No| FAIL1[Block PR\nNotify developer]
-    GATE1 -->|Yes| STAGE2[Stage 2: Integration Tests\non PR approval]
+    GATE1 -->|Yes| STAGE2[Stage 2: Integration + Contract + Chaos + Security\non PR approval]
 
-    STAGE2 --> COMPOSE[Start Docker Compose\nRabbitMQ + DB]
-    COMPOSE --> INTTEST[Integration Tests\npytest tests/integration]
-    INTTEST --> COVERAGE[Coverage Report\npytest-cov ≥ 80%]
+    STAGE2 --> INTTEST[Integration Tests\npytest tests/integration]
+    STAGE2 --> CONTRACT[Contract Tests\npytest tests/contract]
+    STAGE2 --> CHAOS[Chaos Tests\npytest tests/chaos]
+    STAGE2 --> SECTEST[Security Tests\npytest tests/security]
+    STAGE2 --> COVERAGE[Coverage Report\npytest-cov ≥ 80%]
 
-    COVERAGE --> GATE2{Pass + coverage?}
-    GATE2 -->|No| FAIL2[Block merge\nPost coverage report]
-    GATE2 -->|Yes| MERGE[Merge to main]
+    INTTEST & CONTRACT & CHAOS & SECTEST & COVERAGE --> GATE2{All pass?}
+    GATE2 -->|No| FAIL2[Block merge\nPost report as artifact]
+    GATE2 -->|Yes| STAGE2B[Stage 2b: Real-service Tests\nRabbitMQ + PostgreSQL containers]
+
+    STAGE2B --> REALTEST[Real-service Integration Tests\npytest tests/integration_real]
+    REALTEST --> MERGE[Merge to main]
 
     MERGE --> STAGE3[Stage 3: Deploy to Staging]
     STAGE3 --> DAST[DAST Scan\nOWASP ZAP]
@@ -360,13 +552,22 @@ flowchart TD
     GATE3 -->|No| ROLLBACK[Rollback staging\nAlert team]
     GATE3 -->|Yes| DEPLOY[Deploy to Production]
 
-    NIGHTLY[Nightly Schedule] --> LOAD[Load Tests\nLocust — 500 users]
+    NIGHTLY[Nightly Schedule] --> LOAD[Load Tests\npytest throughput suite]
     LOAD --> PERF_REPORT[Performance Report\ntrend comparison]
     PERF_REPORT --> PERF_GATE{SLA met?}
     PERF_GATE -->|No| PERF_ALERT[Alert team\nSlack + email]
 ```
 
 ### 5.2 GitHub Actions Workflow Structure
+
+The actual workflow lives at `.github/workflows/ci.yml`. The table below summarises the four jobs and their trigger conditions.
+
+| Job | Trigger | Depends on | Key steps |
+|---|---|---|---|
+| `fast-checks` | Every push and PR | — | flake8, black --check, Bandit, unit tests + 80% coverage gate |
+| `integration-tests` | After `fast-checks` passes | `fast-checks` | In-memory integration, contract, chaos, security tests; HTML report artifact |
+| `real-service-tests` | After `fast-checks` passes | `fast-checks` | RabbitMQ 3.12 + PostgreSQL 15 service containers; `tests/integration_real/` |
+| `load-tests` | Nightly schedule only (`0 2 * * *`) | — | `pytest tests/load/test_pipeline_throughput.py`; Slack alert on SLA breach |
 
 ```yaml
 # .github/workflows/ci.yml (simplified structure)
@@ -386,36 +587,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Lint (flake8 + black)
+      - name: Lint (flake8 + black --check)
       - name: SAST scan (Bandit)
-      - name: Unit tests (pytest tests/unit --cov --cov-fail-under=80)
-      - name: Schema validation
+      - name: Unit tests (pytest -m unit --cov --cov-fail-under=80)
 
   integration-tests:
     needs: fast-checks
     runs-on: ubuntu-latest
+    steps:
+      - name: Integration tests  (pytest -m integration)
+      - name: Contract tests     (pytest tests/contract/)
+      - name: Chaos tests        (pytest tests/chaos/)
+      - name: Security tests     (pytest -m security)
+      - name: Upload HTML reports as artifacts
+
+  real-service-tests:
+    needs: fast-checks
+    runs-on: ubuntu-latest
     services:
       rabbitmq:
-        image: rabbitmq:3-management
+        image: rabbitmq:3.12-management
       postgres:
         image: postgres:15
     steps:
-      - name: Run integration tests (pytest tests/integration)
-      - name: Upload coverage report (artifact + PR comment)
-
-  security-scan:
-    needs: integration-tests
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: OWASP ZAP baseline scan against staging URL
+      - name: Run real-service integration tests (pytest tests/integration_real)
 
   load-tests:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - name: Run Locust (headless, 500 users, 5 min)
-      - name: Assert p99 < 500ms, failure rate < 1%
-      - name: Upload Locust HTML report
+      - name: Run pytest throughput suite (SLA-gated)
+      - name: Upload load test HTML report
       - name: Notify Slack on SLA breach
 ```
 
@@ -424,9 +626,11 @@ jobs:
 | Event | Report | Alert channel |
 |---|---|---|
 | Unit/integration test failure on PR | GitHub PR check fails; pytest-html report uploaded as artifact | GitHub PR comment with failure summary |
+| Contract test failure on PR | `contract-report.html` artifact; job fails and blocks merge | GitHub PR check |
+| Chaos test failure on PR | `chaos-report.html` artifact; job fails and blocks merge | GitHub PR check |
 | Coverage below threshold | PR blocked; coverage diff posted as comment | PR comment |
 | Staging DAST finding | ZAP HTML report as artifact | Slack `#security-alerts` |
-| Load test SLA breach | Locust HTML report + trend chart | Slack `#performance-alerts` + email |
+| Load test SLA breach | Locust/pytest HTML report + trend chart | Slack `#performance-alerts` + email |
 | Nightly test failure | Full report in GitHub Actions summary | Slack `#qa-alerts` |
 
 ---
@@ -492,3 +696,6 @@ graph TB
 | REST API error rate | Prometheus | > 1% of requests |
 | Pod restart count | Kubernetes | > 2 restarts in 10 minutes |
 | DB connection pool utilisation | Prometheus | > 80% |
+| Unacknowledged message count | RabbitMQ | > 500 per queue |
+| Contract test failures (CI) | GitHub Actions | Any failure blocks merge |
+| Chaos test failures (CI) | GitHub Actions | Any failure blocks merge |
