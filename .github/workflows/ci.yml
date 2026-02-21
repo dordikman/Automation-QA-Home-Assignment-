@@ -30,18 +30,14 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Lint — flake8
-        run: |
-          pip install flake8
-          flake8 mocks/ tests/ --max-line-length=100 --extend-ignore=E203
+        run: flake8 mocks/ tests/ --max-line-length=100 --extend-ignore=E203
 
       - name: Format check — black
-        run: |
-          pip install black
-          black --check mocks/ tests/ --line-length=100
+        run: black --check mocks/ tests/ --line-length=100
 
       - name: SAST — Bandit
         run: bandit -r mocks/ -f json -o bandit-report.json -ll
-        continue-on-error: true   # report findings; do not block on low severity
+        continue-on-error: true
 
       - name: Unit tests with coverage
         run: |
@@ -72,15 +68,18 @@ jobs:
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: bandit-report
           path: bandit-report.json
 
   # ─────────────────────────────────────────────────────────────
-  # Stage 2 — Integration + security tests on PR approval
+  # Stage 2 — Integration + contract + chaos + security tests
+  # Runs after fast-checks pass
+  # All these tests use the in-memory broker — NO Docker needed
   # ─────────────────────────────────────────────────────────────
   integration-tests:
-    name: "Integration & security tests"
+    name: "Integration · Contract · Chaos · Security tests"
     runs-on: ubuntu-latest
     needs: fast-checks
 
@@ -95,33 +94,114 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Integration tests
-        run: pytest -m integration -v
+      - name: Integration tests (in-memory pipeline)
+        run: pytest -m integration -v --html=integration-report.html --self-contained-html
 
-      - name: Security tests
-        run: pytest -m security -v
+      - name: Contract tests (schema compatibility between components)
+        run: pytest tests/contract/ -v --html=contract-report.html --self-contained-html
+        continue-on-error: false
 
-      - name: Generate HTML report
-        if: always()
-        run: |
-          pytest -m "integration or security" \
-            --html=test-report.html \
-            --self-contained-html \
-            -v || true
+      - name: Chaos / resilience tests (failure-mode scenarios)
+        run: pytest tests/chaos/ -v --html=chaos-report.html --self-contained-html
+        continue-on-error: false
 
-      - name: Upload test report
+      - name: Security tests (auth · injection · rate limiting)
+        run: pytest -m security -v --html=security-report.html --self-contained-html
+
+      - name: Upload all test reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: integration-security-report
+          name: integration-security-reports
           path: |
-            test-report.html
+            integration-report.html
+            contract-report.html
+            chaos-report.html
+            security-report.html
+            test-results.xml
+            test.log
+
+  # ─────────────────────────────────────────────────────────────
+  # Stage 2b — Real-service integration tests (optional)
+  # Runs only when Docker services are available in CI
+  # Uses GitHub Actions service containers for RabbitMQ + PostgreSQL
+  # Tests auto-skip gracefully if services are unreachable
+  # ─────────────────────────────────────────────────────────────
+  real-service-tests:
+    name: "Real-service tests (RabbitMQ + PostgreSQL)"
+    runs-on: ubuntu-latest
+    needs: fast-checks
+
+    services:
+      rabbitmq:
+        image: rabbitmq:3.12-management
+        ports:
+          - 5672:5672
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        options: >-
+          --health-cmd "rabbitmq-diagnostics ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      postgres:
+        image: postgres:15
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: features_db
+          POSTGRES_USER: qa_user
+          POSTGRES_PASSWORD: qa_password
+        options: >-
+          --health-cmd "pg_isready -U qa_user -d features_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      RABBITMQ_HOST: localhost
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASSWORD: guest
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: features_db
+      POSTGRES_USER: qa_user
+      POSTGRES_PASSWORD: qa_password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Real-service integration tests
+        run: |
+          pytest tests/integration_real/ -v \
+            --html=real-service-report.html \
+            --self-contained-html
+
+      - name: Upload real-service report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-service-report
+          path: |
+            real-service-report.html
             test-results.xml
             test.log
 
   # ─────────────────────────────────────────────────────────────
   # Stage 3 — Load tests (nightly schedule only)
-  # Runs pytest pipeline throughput suite; fails if SLA thresholds are breached
+  # Uses pytest pipeline throughput suite (NOT Locust — no server needed)
+  # Fails the job if SLA thresholds are breached
   # ─────────────────────────────────────────────────────────────
   load-tests:
     name: "Load tests (nightly)"
@@ -139,12 +219,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run pipeline load tests
+      - name: Run pipeline load tests (SLA-gated)
         run: |
           pytest tests/load/test_pipeline_throughput.py \
             --html=load-test-report.html \
             --self-contained-html \
-            -v
+            -v -s
 
       - name: Upload load test report
         uses: actions/upload-artifact@v4
@@ -159,6 +239,7 @@ jobs:
       - name: Notify Slack on SLA breach
         if: failure()
         uses: slackapi/slack-github-action@v1
+        continue-on-error: true   # do not fail the job if Slack secret is missing
         with:
           payload: |
             {
