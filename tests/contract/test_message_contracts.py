@@ -16,7 +16,7 @@ import pytest
 
 from mocks.algorithm_a import AlgorithmA
 from mocks.algorithm_b import AlgorithmB
-from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A, FEATURES_B, InMemoryBroker
+from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A, FEATURES_B
 from mocks.sensor import Sensor
 from tests.helpers import make_audio_message, make_feature_a_message, make_feature_b_message
 
@@ -72,8 +72,13 @@ class TestFeatureAContract:
         await algo_a.process_one()
         feature_a = inbox.get_nowait()
         required = {
-            "message_id", "source_message_id", "feature_type",
-            "sensor_id", "timestamp", "processed_at", "features",
+            "message_id",
+            "source_message_id",
+            "feature_type",
+            "sensor_id",
+            "timestamp",
+            "processed_at",
+            "features",
         }
         assert required.issubset(set(feature_a.keys()))
 
@@ -145,8 +150,13 @@ class TestFeatureBContract:
         await broker.publish_fanout(FEATURES_A, make_feature_a_message())
         feature_b = await algo_b.process_one()
         required = {
-            "message_id", "source_message_id", "feature_type",
-            "sensor_id", "timestamp", "processed_at", "features",
+            "message_id",
+            "source_message_id",
+            "feature_type",
+            "sensor_id",
+            "timestamp",
+            "processed_at",
+            "features",
         }
         assert required.issubset(set(feature_b.keys()))
 
@@ -231,9 +241,7 @@ class TestDataWriterDatabaseContract:
         results = data_writer.query(feature_type="A")
         assert results[0]["features"] == original_features
 
-    async def test_query_by_sensor_id_returns_only_matching_records(
-        self, data_writer, broker
-    ):
+    async def test_query_by_sensor_id_returns_only_matching_records(self, data_writer, broker):
         await broker.publish_fanout(FEATURES_A, make_feature_a_message(sensor_id="sensor-target"))
         await broker.publish_fanout(FEATURES_A, make_feature_a_message(sensor_id="sensor-other"))
         await data_writer.flush()

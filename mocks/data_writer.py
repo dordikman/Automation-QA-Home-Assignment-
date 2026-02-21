@@ -45,7 +45,9 @@ class DataWriter:
             self.db.append(dict(message))
             logger.debug(
                 "Wrote Feature %s msg=%s sensor=%s",
-                message.get("feature_type"), message["message_id"], message.get("sensor_id"),
+                message.get("feature_type"),
+                message["message_id"],
+                message.get("sensor_id"),
             )
             return True
 
@@ -64,7 +66,9 @@ class DataWriter:
                 except asyncio.QueueEmpty:
                     break
         if written:
-            logger.info("DataWriter flushed %d new record(s) to DB (total=%d)", written, len(self.db))
+            logger.info(
+                "DataWriter flushed %d new record(s) to DB (total=%d)", written, len(self.db)
+            )
         return written
 
     def query(

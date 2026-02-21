@@ -56,9 +56,7 @@ class InMemoryBroker:
                 self._work_queues[queue_name] = asyncio.Queue()
         try:
             if timeout > 0:
-                return await asyncio.wait_for(
-                    self._work_queues[queue_name].get(), timeout=timeout
-                )
+                return await asyncio.wait_for(self._work_queues[queue_name].get(), timeout=timeout)
             return self._work_queues[queue_name].get_nowait()
         except (asyncio.QueueEmpty, asyncio.TimeoutError):
             return None

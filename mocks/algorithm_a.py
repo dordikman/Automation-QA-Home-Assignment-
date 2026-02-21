@@ -89,7 +89,9 @@ class AlgorithmA:
         self.processed_count += 1
         logger.info(
             "AlgoA processed audio=%s → feature_a=%s sensor=%s",
-            message["message_id"], feature_a["message_id"], feature_a["sensor_id"],
+            message["message_id"],
+            feature_a["message_id"],
+            feature_a["sensor_id"],
         )
         return feature_a
 

@@ -27,9 +27,7 @@ def _validate(message: dict) -> None:
     if missing:
         raise ValueError(f"Invalid Feature A message: missing fields {missing}")
     if message.get("feature_type") != "A":
-        raise TypeError(
-            f"Expected feature_type 'A', got '{message.get('feature_type')}'"
-        )
+        raise TypeError(f"Expected feature_type 'A', got '{message.get('feature_type')}'")
 
 
 def _derive_features(feature_a: dict) -> dict:
@@ -96,7 +94,8 @@ class AlgorithmB:
         self.processed_count += 1
         logger.info(
             "AlgoB processed feature_a=%s → feature_b=%s classification=%s",
-            message["message_id"], feature_b["message_id"],
+            message["message_id"],
+            feature_b["message_id"],
             feature_b["features"]["classification"],
         )
         return feature_b

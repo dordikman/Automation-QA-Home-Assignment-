@@ -26,6 +26,7 @@ try:
     from infra.broker import RealBroker
     from infra.data_writer import RealDataWriter
     from infra.database import PostgreSQLDatabase
+
     _HAS_DEPS = True
 except ImportError:
     _HAS_DEPS = False
@@ -35,11 +36,13 @@ except ImportError:
 # Service availability — checked once at module import
 # ------------------------------------------------------------------
 
+
 def _rabbitmq_available() -> bool:
     if not _HAS_DEPS:
         return False
     try:
         import pika
+
         conn = pika.BlockingConnection(
             pika.ConnectionParameters(
                 os.environ.get("RABBITMQ_HOST", "localhost"),
@@ -62,6 +65,7 @@ def _postgres_available() -> bool:
         return False
     try:
         import psycopg2
+
         conn = psycopg2.connect(
             host=os.environ.get("POSTGRES_HOST", "localhost"),
             dbname=os.environ.get("POSTGRES_DB", "features_db"),
@@ -82,19 +86,18 @@ _SERVICES_UP = _rabbitmq_available() and _postgres_available()
 # Autouse skip — applied to every test in this directory
 # ------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def require_real_services():
     if not _SERVICES_UP:
-        pytest.skip(
-            "Real services not available. "
-            "Start them with: docker-compose up -d"
-        )
+        pytest.skip("Real services not available. " "Start them with: docker-compose up -d")
 
 
 # ------------------------------------------------------------------
 # Session-level cleanup — runs once at the start of the test session
 # Guarantees a clean slate even if a previous session crashed mid-test
 # ------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _session_cleanup():
@@ -116,6 +119,7 @@ def _session_cleanup():
 # ------------------------------------------------------------------
 # Per-test fixtures — fresh, isolated state for each test
 # ------------------------------------------------------------------
+
 
 @pytest.fixture
 def real_broker():

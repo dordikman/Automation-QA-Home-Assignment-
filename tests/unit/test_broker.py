@@ -7,11 +7,9 @@ Covers the broker API that is not exercised by the algorithm or data-writer test
   TestBrokerPurge         — purge_all clears all state
 """
 
-import asyncio
-
 import pytest
 
-from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A, InMemoryBroker
+from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A
 from tests.helpers import make_audio_message, make_feature_a_message
 
 
@@ -52,6 +50,7 @@ class TestFanoutUtilities:
 
     async def test_subscriber_count_is_independent_per_topic(self, broker):
         from mocks.rabbitmq import FEATURES_B
+
         broker.subscribe_fanout(FEATURES_A)
         broker.subscribe_fanout(FEATURES_A)
         broker.subscribe_fanout(FEATURES_B)

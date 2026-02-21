@@ -79,15 +79,27 @@ class TestDataWriterQuery:
     @pytest.fixture(autouse=True)
     async def _populate_db(self, data_writer, broker):
         """Pre-populate the DB with two Feature A and one Feature B record."""
-        await broker.publish_fanout(FEATURES_A, make_feature_a_message(
-            sensor_id="sensor-01", timestamp="2024-01-15T08:00:00+00:00",
-        ))
-        await broker.publish_fanout(FEATURES_A, make_feature_a_message(
-            sensor_id="sensor-02", timestamp="2024-01-15T12:00:00+00:00",
-        ))
-        await broker.publish_fanout(FEATURES_B, make_feature_b_message(
-            sensor_id="sensor-01", timestamp="2024-01-15T08:00:01+00:00",
-        ))
+        await broker.publish_fanout(
+            FEATURES_A,
+            make_feature_a_message(
+                sensor_id="sensor-01",
+                timestamp="2024-01-15T08:00:00+00:00",
+            ),
+        )
+        await broker.publish_fanout(
+            FEATURES_A,
+            make_feature_a_message(
+                sensor_id="sensor-02",
+                timestamp="2024-01-15T12:00:00+00:00",
+            ),
+        )
+        await broker.publish_fanout(
+            FEATURES_B,
+            make_feature_b_message(
+                sensor_id="sensor-01",
+                timestamp="2024-01-15T08:00:01+00:00",
+            ),
+        )
         await data_writer.flush()
 
     async def test_query_with_no_filters_returns_all_records(self, data_writer):

@@ -24,7 +24,7 @@ PostgreSQL
 import pytest
 
 from mocks.algorithm_a import AlgorithmA
-from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A, FEATURES_B
+from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A
 from tests.helpers import make_audio_message, make_feature_a_message, make_feature_b_message
 
 
@@ -140,7 +140,7 @@ class TestRealPostgresDatabase:
         """Idempotency enforced at the database level, not just in application code."""
         msg = make_feature_a_message()
         assert real_db.write(msg) is True
-        assert real_db.write(msg) is False   # ON CONFLICT DO NOTHING
+        assert real_db.write(msg) is False  # ON CONFLICT DO NOTHING
         assert len(real_db.query()) == 1
 
     async def test_query_filters_by_feature_type(self, real_db):
@@ -173,7 +173,7 @@ class TestRealPostgresDatabase:
         real_db.write(make_feature_a_message())
         results = real_db.query(sensor_id="' OR '1'='1")
         assert results == []
-        assert len(real_db.query()) == 1   # original record still intact
+        assert len(real_db.query()) == 1  # original record still intact
 
 
 @pytest.mark.real
@@ -183,9 +183,9 @@ class TestRealEndToEnd:
     async def test_feature_a_and_b_written_to_db_after_pipeline_run(self, real_pipeline):
         await real_pipeline.sensor.publish_audio(timestamp="2024-01-15T10:00:00+00:00")
 
-        await real_pipeline.algo_a.process_one()    # audio → Feature A
-        await real_pipeline.algo_b.process_one()    # Feature A → Feature B
-        await real_pipeline.writer.flush()          # Features A+B → PostgreSQL
+        await real_pipeline.algo_a.process_one()  # audio → Feature A
+        await real_pipeline.algo_b.process_one()  # Feature A → Feature B
+        await real_pipeline.writer.flush()  # Features A+B → PostgreSQL
 
         results = real_pipeline.db.query()
         assert len(results) == 2
@@ -218,9 +218,7 @@ class TestRealEndToEnd:
         assert len(out_of_range) == 0
 
     async def test_multiple_sensors_data_isolated_by_sensor_id(self, real_pipeline):
-        sensor_2 = type(real_pipeline.sensor)(
-            real_pipeline.broker, sensor_id="sensor-other"
-        )
+        sensor_2 = type(real_pipeline.sensor)(real_pipeline.broker, sensor_id="sensor-other")
 
         await real_pipeline.sensor.publish_audio()
         await sensor_2.publish_audio()
@@ -232,5 +230,5 @@ class TestRealEndToEnd:
         results_1 = real_pipeline.db.query(sensor_id=real_pipeline.sensor.sensor_id)
         results_2 = real_pipeline.db.query(sensor_id="sensor-other")
 
-        assert len(results_1) == 2   # Feature A + B for sensor 1
-        assert len(results_2) == 2   # Feature A + B for sensor 2
+        assert len(results_1) == 2  # Feature A + B for sensor 1
+        assert len(results_2) == 2  # Feature A + B for sensor 2

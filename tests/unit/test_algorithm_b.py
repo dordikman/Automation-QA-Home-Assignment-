@@ -63,9 +63,16 @@ class TestAlgorithmBProcess:
         metrics = result["features"]["derived_metrics"]
         assert {"mfcc_mean", "spectral_spread", "activity_score"}.issubset(metrics.keys())
 
-    @pytest.mark.parametrize("missing_field", [
-        "message_id", "sensor_id", "timestamp", "feature_type", "features",
-    ])
+    @pytest.mark.parametrize(
+        "missing_field",
+        [
+            "message_id",
+            "sensor_id",
+            "timestamp",
+            "feature_type",
+            "features",
+        ],
+    )
     async def test_missing_required_field_raises_value_error(self, algo_b, missing_field):
         msg = make_feature_a_message()
         del msg[missing_field]

@@ -19,28 +19,37 @@ _VALID_HEADERS = {"Authorization": "Bearer test-token"}
 class TestAuthentication:
     """Every endpoint must reject requests that lack or present invalid credentials."""
 
-    @pytest.mark.parametrize("endpoint", [
-        "/features/realtime",
-        "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
-    ])
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/features/realtime",
+            "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
+        ],
+    )
     async def test_no_auth_header_returns_401(self, client, endpoint):
         response = client.get(endpoint)
         assert response.status_code == 401
 
-    @pytest.mark.parametrize("endpoint", [
-        "/features/realtime",
-        "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
-    ])
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/features/realtime",
+            "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
+        ],
+    )
     async def test_invalid_token_returns_403(self, client, endpoint):
         response = client.get(endpoint, headers={"Authorization": "Bearer wrong-token"})
         assert response.status_code == 403
 
-    @pytest.mark.parametrize("bad_header", [
-        "no-scheme-prefix",       # missing 'Bearer'
-        "Basic dXNlcjpwYXNz",    # wrong scheme
-        "Bearer",                 # scheme with no token
-        "",                       # empty string
-    ])
+    @pytest.mark.parametrize(
+        "bad_header",
+        [
+            "no-scheme-prefix",  # missing 'Bearer'
+            "Basic dXNlcjpwYXNz",  # wrong scheme
+            "Bearer",  # scheme with no token
+            "",  # empty string
+        ],
+    )
     async def test_malformed_auth_header_returns_401(self, client, bad_header):
         response = client.get(
             "/features/realtime",
@@ -65,14 +74,19 @@ class TestInputValidation:
     downstream processing (e.g., date parsing, DB queries).
     """
 
-    @pytest.mark.parametrize("injected_value", [
-        "' OR '1'='1",
-        "'; DROP TABLE features; --",
-        "2024-01-15T00:00:00+00:00' OR '1'='1",
-        "<script>alert(1)</script>",
-        "../../../etc/passwd",
-    ])
-    async def test_sql_and_injection_attempts_in_start_param_return_400(self, client, injected_value):
+    @pytest.mark.parametrize(
+        "injected_value",
+        [
+            "' OR '1'='1",
+            "'; DROP TABLE features; --",
+            "2024-01-15T00:00:00+00:00' OR '1'='1",
+            "<script>alert(1)</script>",
+            "../../../etc/passwd",
+        ],
+    )
+    async def test_sql_and_injection_attempts_in_start_param_return_400(
+        self, client, injected_value
+    ):
         response = client.get(
             "/features/historical",
             query_string={
@@ -83,10 +97,13 @@ class TestInputValidation:
         )
         assert response.status_code == 400
 
-    @pytest.mark.parametrize("injected_value", [
-        "' OR '1'='1",
-        "'; DROP TABLE features; --",
-    ])
+    @pytest.mark.parametrize(
+        "injected_value",
+        [
+            "' OR '1'='1",
+            "'; DROP TABLE features; --",
+        ],
+    )
     async def test_injection_attempts_in_end_param_return_400(self, client, injected_value):
         response = client.get(
             "/features/historical",
@@ -171,8 +188,7 @@ class TestRateLimiting:
         Sending 110 requests from the same client must trigger at least one 429.
         """
         statuses = [
-            client.get("/features/realtime", headers=_VALID_HEADERS).status_code
-            for _ in range(110)
+            client.get("/features/realtime", headers=_VALID_HEADERS).status_code for _ in range(110)
         ]
         assert 429 in statuses, "Rate limiting was not enforced after 110 requests"
 

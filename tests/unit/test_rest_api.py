@@ -19,27 +19,36 @@ _VALID_HEADERS = {"Authorization": "Bearer test-token"}
 class TestAuthentication:
     """Both endpoints must enforce Bearer token authentication."""
 
-    @pytest.mark.parametrize("endpoint", [
-        "/features/realtime",
-        "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
-    ])
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/features/realtime",
+            "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
+        ],
+    )
     async def test_missing_auth_header_returns_401(self, client, endpoint):
         response = client.get(endpoint)
         assert response.status_code == 401
 
-    @pytest.mark.parametrize("endpoint", [
-        "/features/realtime",
-        "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
-    ])
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "/features/realtime",
+            "/features/historical?start=2024-01-01T00:00:00+00:00&end=2024-12-31T00:00:00+00:00",
+        ],
+    )
     async def test_invalid_token_returns_403(self, client, endpoint):
         response = client.get(endpoint, headers={"Authorization": "Bearer bad-token"})
         assert response.status_code == 403
 
-    @pytest.mark.parametrize("bad_header", [
-        "bad-token",          # missing 'Bearer' scheme
-        "Basic dXNlcjpwYXNz", # wrong scheme
-        "",                   # empty string
-    ])
+    @pytest.mark.parametrize(
+        "bad_header",
+        [
+            "bad-token",  # missing 'Bearer' scheme
+            "Basic dXNlcjpwYXNz",  # wrong scheme
+            "",  # empty string
+        ],
+    )
     async def test_malformed_auth_header_returns_401(self, client, bad_header):
         response = client.get(
             "/features/realtime",
@@ -163,11 +172,14 @@ class TestHistoricalEndpoint:
         )
         assert response.status_code == 400
 
-    @pytest.mark.parametrize("bad_ts", [
-        "not-a-date",
-        "15/01/2024",
-        "2024-13-01T00:00:00+00:00",
-    ])
+    @pytest.mark.parametrize(
+        "bad_ts",
+        [
+            "not-a-date",
+            "15/01/2024",
+            "2024-13-01T00:00:00+00:00",
+        ],
+    )
     async def test_invalid_timestamp_format_returns_400(self, client, bad_ts):
         response = client.get(
             "/features/historical",
@@ -179,9 +191,16 @@ class TestHistoricalEndpoint:
     async def test_records_with_malformed_timestamps_are_skipped(self, client, data_writer):
         """A DB record with a bad timestamp must be silently skipped; valid records returned."""
         from tests.helpers import make_feature_a_message
+
         data_writer.db.append(make_feature_a_message(timestamp="2024-01-15T10:00:00+00:00"))
-        data_writer.db.append({"message_id": "bad-ts-id", "timestamp": "NOT-A-DATE",
-                                "feature_type": "A", "sensor_id": "s"})
+        data_writer.db.append(
+            {
+                "message_id": "bad-ts-id",
+                "timestamp": "NOT-A-DATE",
+                "feature_type": "A",
+                "sensor_id": "s",
+            }
+        )
         response = client.get(
             "/features/historical",
             query_string={
@@ -198,6 +217,7 @@ class TestHistoricalEndpoint:
         """When the app is created without a DB reference, historical returns an empty list."""
         from mocks.rest_api import create_app
         from mocks.rabbitmq import InMemoryBroker
+
         no_db_app = create_app(InMemoryBroker(), db=None)
         no_db_app.config["TESTING"] = True
         no_db_client = no_db_app.test_client()

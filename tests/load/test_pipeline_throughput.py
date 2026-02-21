@@ -32,16 +32,17 @@ from statistics import quantiles
 import pytest
 
 from mocks.algorithm_a import AlgorithmA
+from mocks.data_writer import DataWriter
 from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A, FEATURES_B
 from tests.helpers import make_feature_a_message, make_feature_b_message
 
 # ---------------------------------------------------------------------------
 # SLA constants
 # ---------------------------------------------------------------------------
-_SLA_ALGO_A_MSGS_PER_SEC = 100       # minimum AlgorithmA throughput
-_SLA_E2E_LATENCY_P99_MS = 2_000      # maximum end-to-end pipeline p99 latency (ms)
-_SLA_DATAWRITER_FEATS_PER_SEC = 50   # minimum DataWriter flush throughput
-_SLA_API_P99_MS = 500                # maximum REST API p99 response time (ms)
+_SLA_ALGO_A_MSGS_PER_SEC = 100  # minimum AlgorithmA throughput
+_SLA_E2E_LATENCY_P99_MS = 2_000  # maximum end-to-end pipeline p99 latency (ms)
+_SLA_DATAWRITER_FEATS_PER_SEC = 50  # minimum DataWriter flush throughput
+_SLA_API_P99_MS = 500  # maximum REST API p99 response time (ms)
 
 _AUTH = {"Authorization": "Bearer test-token"}
 
@@ -49,6 +50,7 @@ _AUTH = {"Authorization": "Bearer test-token"}
 # ---------------------------------------------------------------------------
 # 1. Algorithm A throughput
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.load
 class TestAudioQueueThroughput:
@@ -74,9 +76,9 @@ class TestAudioQueueThroughput:
         elapsed = time.perf_counter() - start
 
         throughput = processed / elapsed
-        assert processed == message_count, (
-            f"Expected all {message_count} messages processed, got {processed}"
-        )
+        assert (
+            processed == message_count
+        ), f"Expected all {message_count} messages processed, got {processed}"
         assert throughput >= _SLA_ALGO_A_MSGS_PER_SEC, (
             f"AlgorithmA throughput {throughput:.1f} msgs/s is below SLA of "
             f"{_SLA_ALGO_A_MSGS_PER_SEC} msgs/s"
@@ -98,9 +100,9 @@ class TestAudioQueueThroughput:
         while not probe.empty():
             features_produced.append(probe.get_nowait())
 
-        assert len(features_produced) == message_count, (
-            f"Expected {message_count} Feature A messages, got {len(features_produced)}"
-        )
+        assert (
+            len(features_produced) == message_count
+        ), f"Expected {message_count} Feature A messages, got {len(features_produced)}"
         unique_sources = {f["source_message_id"] for f in features_produced}
         assert len(unique_sources) == message_count, (
             "Duplicate Feature A outputs detected — each audio message must produce "
@@ -112,6 +114,7 @@ class TestAudioQueueThroughput:
 # 2. Multi-pod scalability (competing consumers)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.load
 class TestMultiPodScalability:
     """
@@ -122,9 +125,7 @@ class TestMultiPodScalability:
     This is enforced by the work-queue (not fanout) pattern on the audio stream.
     """
 
-    async def test_two_pods_process_all_1000_messages_without_loss_or_duplication(
-        self, pipeline
-    ):
+    async def test_two_pods_process_all_1000_messages_without_loss_or_duplication(self, pipeline):
         """
         Publish 1 000 audio messages. Two competing Algorithm A pods must together
         process every message exactly once.
@@ -145,26 +146,24 @@ class TestMultiPodScalability:
             f"Total processed ({count_1 + count_2}) != published ({message_count}) "
             f"— messages were dropped"
         )
-        assert pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0, (
-            "Audio queue is not empty after both pods drained it"
-        )
+        assert (
+            pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0
+        ), "Audio queue is not empty after both pods drained it"
 
         features = []
         while not probe.empty():
             features.append(probe.get_nowait())
 
-        assert len(features) == message_count, (
-            f"Feature A output count ({len(features)}) != messages published ({message_count})"
-        )
+        assert (
+            len(features) == message_count
+        ), f"Feature A output count ({len(features)}) != messages published ({message_count})"
         unique_sources = {f["source_message_id"] for f in features}
         assert len(unique_sources) == message_count, (
             f"Only {len(unique_sources)} unique source IDs out of {message_count} — "
             "at least one message was processed more than once"
         )
 
-    async def test_three_pods_process_3000_messages_without_loss_or_duplication(
-        self, pipeline
-    ):
+    async def test_three_pods_process_3000_messages_without_loss_or_duplication(self, pipeline):
         """
         Three competing pods on 3 000 messages — stricter volume test for the
         work-queue guarantee that every message is processed exactly once.
@@ -183,9 +182,9 @@ class TestMultiPodScalability:
             pod_3.process_all(),
         )
 
-        assert sum(counts) == message_count, (
-            f"Total processed {sum(counts)} != published {message_count}"
-        )
+        assert (
+            sum(counts) == message_count
+        ), f"Total processed {sum(counts)} != published {message_count}"
         assert pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0
 
         features = []
@@ -193,14 +192,15 @@ class TestMultiPodScalability:
             features.append(probe.get_nowait())
 
         unique_sources = {f["source_message_id"] for f in features}
-        assert len(unique_sources) == message_count, (
-            f"Duplication detected: {message_count - len(unique_sources)} duplicate(s)"
-        )
+        assert (
+            len(unique_sources) == message_count
+        ), f"Duplication detected: {message_count - len(unique_sources)} duplicate(s)"
 
 
 # ---------------------------------------------------------------------------
 # 3. End-to-end pipeline latency
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.load
 class TestEndToEndPipelineLatency:
@@ -256,12 +256,8 @@ class TestEndToEndPipelineLatency:
         feature_a_count = len(pipeline.writer.query(feature_type="A"))
         feature_b_count = len(pipeline.writer.query(feature_type="B"))
 
-        assert feature_a_count == n, (
-            f"Expected {n} Feature A records in DB, got {feature_a_count}"
-        )
-        assert feature_b_count == n, (
-            f"Expected {n} Feature B records in DB, got {feature_b_count}"
-        )
+        assert feature_a_count == n, f"Expected {n} Feature A records in DB, got {feature_a_count}"
+        assert feature_b_count == n, f"Expected {n} Feature B records in DB, got {feature_b_count}"
 
     async def test_sensor_id_is_preserved_through_full_pipeline_at_scale(self, pipeline):
         """
@@ -289,6 +285,7 @@ class TestEndToEndPipelineLatency:
 # ---------------------------------------------------------------------------
 # 4. DataWriter throughput and idempotency under bulk load
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.load
 class TestDataWriterThroughput:
@@ -318,9 +315,9 @@ class TestDataWriterThroughput:
         elapsed = time.perf_counter() - start
 
         throughput = written / elapsed
-        assert written == feature_count * 2, (
-            f"Expected {feature_count * 2} records written, got {written}"
-        )
+        assert (
+            written == feature_count * 2
+        ), f"Expected {feature_count * 2} records written, got {written}"
         assert throughput >= _SLA_DATAWRITER_FEATS_PER_SEC, (
             f"DataWriter flush throughput {throughput:.1f} features/s is below SLA of "
             f"{_SLA_DATAWRITER_FEATS_PER_SEC} features/s"
@@ -362,14 +359,15 @@ class TestDataWriterThroughput:
                 await broker.publish_fanout(FEATURES_A, make_feature_a_message())
             await writer.flush()
 
-        assert len(writer.db) == cycles * features_per_cycle, (
-            f"Expected {cycles * features_per_cycle} DB records, got {len(writer.db)}"
-        )
+        assert (
+            len(writer.db) == cycles * features_per_cycle
+        ), f"Expected {cycles * features_per_cycle} DB records, got {len(writer.db)}"
 
 
 # ---------------------------------------------------------------------------
 # 5. REST API response time under sequential load
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.load
 class TestRestApiResponseTime:
@@ -407,9 +405,9 @@ class TestRestApiResponseTime:
         latencies_ms.sort()
         p99_ms = quantiles(latencies_ms, n=100)[98]
 
-        assert p99_ms <= _SLA_API_P99_MS, (
-            f"/features/realtime p99 {p99_ms:.1f} ms exceeds SLA of {_SLA_API_P99_MS} ms"
-        )
+        assert (
+            p99_ms <= _SLA_API_P99_MS
+        ), f"/features/realtime p99 {p99_ms:.1f} ms exceeds SLA of {_SLA_API_P99_MS} ms"
 
     async def test_historical_endpoint_p99_is_under_500ms_with_large_dataset(self, pipeline):
         """
@@ -433,9 +431,7 @@ class TestRestApiResponseTime:
 
         for _ in range(request_count):
             t0 = time.perf_counter()
-            resp = pipeline.client.get(
-                "/features/historical", query_string=qs, headers=_AUTH
-            )
+            resp = pipeline.client.get("/features/historical", query_string=qs, headers=_AUTH)
             latencies_ms.append((time.perf_counter() - t0) * 1_000)
             assert resp.status_code == 200
             assert resp.get_json()["count"] == records_per_type * 2
@@ -443,9 +439,9 @@ class TestRestApiResponseTime:
         latencies_ms.sort()
         p99_ms = quantiles(latencies_ms, n=100)[98]
 
-        assert p99_ms <= _SLA_API_P99_MS, (
-            f"/features/historical p99 {p99_ms:.1f} ms exceeds SLA of {_SLA_API_P99_MS} ms"
-        )
+        assert (
+            p99_ms <= _SLA_API_P99_MS
+        ), f"/features/historical p99 {p99_ms:.1f} ms exceeds SLA of {_SLA_API_P99_MS} ms"
 
     async def test_rate_limiter_allows_exactly_100_requests_then_blocks(self, pipeline):
         """
@@ -456,24 +452,22 @@ class TestRestApiResponseTime:
         requests — a common DoS vector against public APIs.
         """
         statuses = [
-            pipeline.client.get("/features/realtime", headers=_AUTH).status_code
-            for _ in range(110)
+            pipeline.client.get("/features/realtime", headers=_AUTH).status_code for _ in range(110)
         ]
 
         successes = statuses.count(200)
         rate_limited = statuses.count(429)
 
-        assert successes == 100, (
-            f"Expected exactly 100 successful requests before rate limiting, got {successes}"
-        )
-        assert rate_limited == 10, (
-            f"Expected 10 rate-limited responses (429), got {rate_limited}"
-        )
+        assert (
+            successes == 100
+        ), f"Expected exactly 100 successful requests before rate limiting, got {successes}"
+        assert rate_limited == 10, f"Expected 10 rate-limited responses (429), got {rate_limited}"
 
 
 # ---------------------------------------------------------------------------
 # 6. Queue backpressure — no message loss when producers outpace consumers
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.load
 class TestQueueBackpressure:
@@ -498,23 +492,23 @@ class TestQueueBackpressure:
         for _ in range(burst_size):
             await pipeline.sensor.publish_audio()
 
-        assert pipeline.broker.work_queue_depth(AUDIO_STREAM) == burst_size, (
-            "Queue depth should equal the published burst before any processing"
-        )
+        assert (
+            pipeline.broker.work_queue_depth(AUDIO_STREAM) == burst_size
+        ), "Queue depth should equal the published burst before any processing"
 
         await pipeline.algo_a.process_all()
         await pipeline.algo_b.process_all()
         await pipeline.writer.flush()
 
-        assert pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0, (
-            "Audio queue must be empty after full processing"
-        )
-        assert len(pipeline.writer.query(feature_type="A")) == burst_size, (
-            f"Expected {burst_size} Feature A records in DB, message loss detected"
-        )
-        assert len(pipeline.writer.query(feature_type="B")) == burst_size, (
-            f"Expected {burst_size} Feature B records in DB, message loss detected"
-        )
+        assert (
+            pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0
+        ), "Audio queue must be empty after full processing"
+        assert (
+            len(pipeline.writer.query(feature_type="A")) == burst_size
+        ), f"Expected {burst_size} Feature A records in DB, message loss detected"
+        assert (
+            len(pipeline.writer.query(feature_type="B")) == burst_size
+        ), f"Expected {burst_size} Feature B records in DB, message loss detected"
 
     async def test_queue_depth_returns_to_zero_after_processing(self, pipeline):
         """
@@ -527,9 +521,9 @@ class TestQueueBackpressure:
                 await pipeline.sensor.publish_audio()
 
             await pipeline.algo_a.process_all()
-            assert pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0, (
-                f"Queue not empty after cycle {cycle + 1} with burst of {burst}"
-            )
+            assert (
+                pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0
+            ), f"Queue not empty after cycle {cycle + 1} with burst of {burst}"
 
     async def test_fanout_delivers_to_all_subscribers_under_high_volume(self, pipeline):
         """

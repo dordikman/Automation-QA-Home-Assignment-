@@ -8,7 +8,6 @@ Tests are split into two classes:
 
 import pytest
 
-from mocks.algorithm_a import AlgorithmA
 from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A
 from tests.helpers import make_audio_message
 
@@ -70,9 +69,15 @@ class TestAlgorithmAProcess:
         result_2 = algo_a.process(msg)
         assert result_1["features"] == result_2["features"]
 
-    @pytest.mark.parametrize("missing_field", [
-        "message_id", "sensor_id", "timestamp", "audio_data",
-    ])
+    @pytest.mark.parametrize(
+        "missing_field",
+        [
+            "message_id",
+            "sensor_id",
+            "timestamp",
+            "audio_data",
+        ],
+    )
     async def test_missing_required_field_raises_value_error(self, algo_a, missing_field):
         msg = make_audio_message()
         del msg[missing_field]
@@ -83,11 +88,14 @@ class TestAlgorithmAProcess:
         with pytest.raises(ValueError, match="audio_data cannot be empty"):
             algo_a.process(make_audio_message(audio_data=""))
 
-    @pytest.mark.parametrize("bad_timestamp", [
-        "not-a-date",
-        "15/01/2024",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "bad_timestamp",
+        [
+            "not-a-date",
+            "15/01/2024",
+            "",
+        ],
+    )
     async def test_invalid_timestamp_raises_value_error(self, algo_a, bad_timestamp):
         with pytest.raises(ValueError):
             algo_a.process(make_audio_message(timestamp=bad_timestamp))

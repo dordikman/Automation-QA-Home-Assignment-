@@ -14,7 +14,7 @@ import pytest
 
 from mocks.algorithm_a import AlgorithmA
 from mocks.algorithm_b import AlgorithmB
-from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A, InMemoryBroker
+from mocks.rabbitmq import AUDIO_STREAM, FEATURES_A
 from tests.helpers import make_audio_message, make_feature_a_message, make_feature_b_message
 
 pytestmark = pytest.mark.chaos
@@ -28,9 +28,7 @@ pytestmark = pytest.mark.chaos
 class TestBrokerResilienceUnderMalformedMessages:
     """Components handle malformed messages without crashing or losing valid data."""
 
-    async def test_algo_a_skips_message_with_missing_fields_and_continues_processing(
-        self, broker
-    ):
+    async def test_algo_a_skips_message_with_missing_fields_and_continues_processing(self, broker):
         """
         A bad message (missing required fields) raises ValueError from AlgorithmA.process().
         Wrapping each process_one() call in try/except must still allow the two
@@ -110,9 +108,7 @@ class TestBrokerResilienceUnderMalformedMessages:
 class TestDataWriterIdempotencyUnderStress:
     """Idempotency guarantees hold under high-duplicate and concurrent conditions."""
 
-    async def test_idempotency_holds_with_100_duplicate_deliveries(
-        self, data_writer, broker
-    ):
+    async def test_idempotency_holds_with_100_duplicate_deliveries(self, data_writer, broker):
         """Publishing the same message 100 times must result in exactly 1 DB record."""
         feature_a = make_feature_a_message()
         for _ in range(100):
@@ -120,9 +116,7 @@ class TestDataWriterIdempotencyUnderStress:
         await data_writer.flush()
         assert len(data_writer.db) == 1
 
-    async def test_concurrent_flush_calls_do_not_create_duplicates(
-        self, data_writer, broker
-    ):
+    async def test_concurrent_flush_calls_do_not_create_duplicates(self, data_writer, broker):
         """
         Five simultaneous flush() coroutines on 10 unique messages must produce
         exactly 10 DB records — no double-writes despite concurrent access.
@@ -134,9 +128,7 @@ class TestDataWriterIdempotencyUnderStress:
 
         assert len(data_writer.db) == 10
 
-    async def test_db_accumulates_correctly_across_50_flush_cycles(
-        self, data_writer, broker
-    ):
+    async def test_db_accumulates_correctly_across_50_flush_cycles(self, data_writer, broker):
         """
         Publish-one / flush-one repeated 50 times must accumulate exactly 50
         distinct records with no duplicates or omissions.
