@@ -188,19 +188,16 @@ class TestRateLimiting:
         Exactly 100 requests must succeed, then all subsequent must be blocked.
         """
         statuses = [
-            client.get("/features/realtime", headers=_VALID_HEADERS).status_code
-            for _ in range(110)
+            client.get("/features/realtime", headers=_VALID_HEADERS).status_code for _ in range(110)
         ]
 
         successes = statuses.count(200)
         rate_limited = statuses.count(429)
 
-        assert successes == 100, (
-            f"Expected exactly 100 successful requests before rate limiting, got {successes}"
-        )
-        assert rate_limited == 10, (
-            f"Expected 10 rate-limited (429) responses, got {rate_limited}"
-        )
+        assert (
+            successes == 100
+        ), f"Expected exactly 100 successful requests before rate limiting, got {successes}"
+        assert rate_limited == 10, f"Expected 10 rate-limited (429) responses, got {rate_limited}"
         # Verify the 429s come AFTER the 200s (not scattered randomly)
         first_429_index = next(i for i, s in enumerate(statuses) if s == 429)
         assert first_429_index == 100, (

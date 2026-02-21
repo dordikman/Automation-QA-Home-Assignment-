@@ -51,13 +51,11 @@ class TestSensorToAlgorithmA:
         while not probe.empty():
             features.append(probe.get_nowait())
 
-        assert len(features) == 5, (
-            f"Expected 5 Feature A messages, got {len(features)}"
-        )
+        assert len(features) == 5, f"Expected 5 Feature A messages, got {len(features)}"
         unique_source_ids = {f["source_message_id"] for f in features}
-        assert len(unique_source_ids) == 5, (
-            "Duplicate processing detected — some audio messages were processed more than once"
-        )
+        assert (
+            len(unique_source_ids) == 5
+        ), "Duplicate processing detected — some audio messages were processed more than once"
 
 
 @pytest.mark.integration
@@ -236,10 +234,10 @@ class TestLoadBalancing:
             pod_3.process_all(),
         )
 
-        assert sum(counts) == 9, (
-            f"Total processed {sum(counts)} != 9 published — messages were lost"
-        )
-        assert pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0, (
-            "Audio queue not empty after all pods finished"
-        )
+        assert (
+            sum(counts) == 9
+        ), f"Total processed {sum(counts)} != 9 published — messages were lost"
+        assert (
+            pipeline.broker.work_queue_depth(AUDIO_STREAM) == 0
+        ), "Audio queue not empty after all pods finished"
         assert all(c >= 0 for c in counts), "Pod processed negative messages (impossible)"

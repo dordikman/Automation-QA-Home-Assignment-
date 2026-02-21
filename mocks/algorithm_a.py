@@ -113,11 +113,13 @@ class AlgorithmA:
                 skipped += 1
                 logger.warning(
                     "AlgoA skipped invalid message (skipped=%d so far): %s",
-                    skipped, exc,
+                    skipped,
+                    exc,
                 )
         if skipped:
             logger.error(
                 "AlgoA finished with %d skipped invalid message(s) out of %d total",
-                skipped, count + skipped,
+                skipped,
+                count + skipped,
             )
         return count
