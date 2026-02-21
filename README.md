@@ -39,8 +39,12 @@ A comprehensive test suite for a distributed audio processing pipeline deployed 
 │   │   └── test_pipeline.py         # 19 tests — stage-by-stage + end-to-end + load balancing
 │   ├── security/
 │   │   └── test_api_security.py     # 25 tests — auth failures, injection, rate limiting
-│   └── load/
-│       └── test_load.py            # Locust script with SLA assertions
+│   ├── load/
+│   │   └── test_load.py            # Locust script with SLA assertions
+│   ├── contract/
+│   │   └── test_message_contracts.py  # Schema contract tests between pipeline components
+│   └── chaos/
+│       └── test_resilience.py      # Resilience and failure-mode tests
 │
 ├── k8s/                             # Kubernetes manifests for the real deployment
 │   ├── rabbitmq-statefulset.yaml    # RabbitMQ StatefulSet + headless Service
@@ -160,6 +164,33 @@ pytest -m unit --cov=mocks --cov-report=term-missing --cov-fail-under=80
 
 ```bash
 pytest -v --html=report.html --self-contained-html
+```
+
+---
+
+## Quick Start (Makefile)
+
+A `Makefile` is provided for convenience. Run `make help` to see all available targets.
+```bash
+make install          # Install all dependencies
+make test             # Run unit + integration + security tests
+make test-unit        # Fast unit tests only (~0.4 s)
+make coverage         # Unit tests with HTML coverage report
+make lint             # Run flake8
+make format           # Auto-format with black
+make sast             # Static security analysis (Bandit)
+```
+
+### Additional Test Suites
+```bash
+# Contract tests — verify schema compatibility between pipeline components
+pytest tests/contract/ -v
+
+# Chaos / resilience tests — verify graceful degradation under failures
+pytest tests/chaos/ -v
+
+# All non-load tests including contract and chaos
+pytest -m "unit or integration or security or contract or chaos" -v
 ```
 
 ---
