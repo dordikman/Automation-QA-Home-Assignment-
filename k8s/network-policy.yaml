@@ -1,0 +1,162 @@
+# Kubernetes NetworkPolicies
+#
+# Enforces the principle of least privilege across the cluster:
+#   - Sensors (external) may only reach RabbitMQ on the AMQP port
+#   - Algorithm pods may only reach RabbitMQ
+#   - DataWriter may reach RabbitMQ and the database
+#   - REST API may reach RabbitMQ and the database
+#   - Only the REST API is reachable from outside the cluster (via Ingress)
+#   - All other cross-pod traffic is denied by default
+#
+# Requires a CNI plugin that enforces NetworkPolicy (e.g., Calico, Cilium).
+
+# ── Default deny all ingress within the namespace ───────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: audio-processing
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# ── RabbitMQ: accept AMQP from internal pods only ───────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq-from-internal
+  namespace: audio-processing
+spec:
+  podSelector:
+    matchLabels:
+      app: rabbitmq
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - algorithm-a
+                  - algorithm-b
+                  - datawriter
+                  - restapi
+      ports:
+        - protocol: TCP
+          port: 5672    # AMQP only; management port not exposed internally
+
+---
+# ── Algorithm A: egress to RabbitMQ only ────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-algorithm-a-egress
+  namespace: audio-processing
+spec:
+  podSelector:
+    matchLabels:
+      app: algorithm-a
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - protocol: TCP
+          port: 5672
+
+---
+# ── Algorithm B: egress to RabbitMQ only ────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-algorithm-b-egress
+  namespace: audio-processing
+spec:
+  podSelector:
+    matchLabels:
+      app: algorithm-b
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - protocol: TCP
+          port: 5672
+
+---
+# ── DataWriter: egress to RabbitMQ + database ───────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-datawriter-egress
+  namespace: audio-processing
+spec:
+  podSelector:
+    matchLabels:
+      app: datawriter
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - protocol: TCP
+          port: 5672
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+
+---
+# ── REST API: egress to RabbitMQ + database; ingress from Ingress controller ─
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-restapi
+  namespace: audio-processing
+spec:
+  podSelector:
+    matchLabels:
+      app: restapi
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx   # Ingress controller namespace
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rabbitmq
+      ports:
+        - protocol: TCP
+          port: 5672
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432

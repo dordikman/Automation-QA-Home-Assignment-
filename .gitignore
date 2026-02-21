@@ -1,0 +1,22 @@
+# Environment — never commit secrets
+.env
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+bandit-report.json
+report.html
+test-report.html
+unit-test-report.html
+test-results.xml
+test.log
+tests/load/report.html

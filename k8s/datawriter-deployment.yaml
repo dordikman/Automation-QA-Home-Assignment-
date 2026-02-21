@@ -1,0 +1,70 @@
+# DataWriter — Deployment
+#
+# Subscribes to both features_a and features_b exchanges (fanout).
+# Writes all received features asynchronously to PostgreSQL.
+# Runs as a small, stable deployment — scaling is less critical since
+# writes are async and the queue absorbs burst traffic.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: datawriter
+  namespace: audio-processing
+  labels:
+    app: datawriter
+    component: storage
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: datawriter
+  template:
+    metadata:
+      labels:
+        app: datawriter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+    spec:
+      containers:
+        - name: datawriter
+          image: your-registry/datawriter:latest
+          imagePullPolicy: Always
+          env:
+            - name: RABBITMQ_HOST
+              value: rabbitmq.audio-processing.svc.cluster.local
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: username
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: DB_HOST
+              value: postgres.audio-processing.svc.cluster.local
+            - name: DB_NAME
+              value: features_db
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: username
+            - name: DB_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: password
+            - name: FEATURES_A_EXCHANGE
+              value: features_a
+            - name: FEATURES_B_EXCHANGE
+              value: features_b
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "128Mi"
+            limits:
+              cpu: "1"
+              memory: "256Mi"

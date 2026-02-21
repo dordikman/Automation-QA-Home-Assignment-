@@ -1,0 +1,115 @@
+# REST API — Deployment + Service + Ingress
+#
+# The only component exposed to the internet (via Ingress with TLS).
+# Subscribes to both feature exchanges for real-time caching and
+# queries PostgreSQL for historical data.
+# An Ingress controller (e.g., nginx-ingress) handles TLS termination.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: restapi
+  namespace: audio-processing
+  labels:
+    app: restapi
+    component: api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: restapi
+  template:
+    metadata:
+      labels:
+        app: restapi
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8000"
+    spec:
+      containers:
+        - name: restapi
+          image: your-registry/restapi:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          env:
+            - name: RABBITMQ_HOST
+              value: rabbitmq.audio-processing.svc.cluster.local
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: username
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: DB_HOST
+              value: postgres.audio-processing.svc.cluster.local
+            - name: REALTIME_CACHE_MINUTES
+              value: "5"
+            - name: API_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: api-credentials
+                  key: secret-key
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: restapi
+  namespace: audio-processing
+spec:
+  selector:
+    app: restapi
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: restapi-ingress
+  namespace: audio-processing
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.audio-system.example.com
+      secretName: restapi-tls
+  rules:
+    - host: api.audio-system.example.com
+      http:
+        paths:
+          - path: /features
+            pathType: Prefix
+            backend:
+              service:
+                name: restapi
+                port:
+                  number: 80

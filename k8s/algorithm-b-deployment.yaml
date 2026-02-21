@@ -1,0 +1,87 @@
+# Algorithm B — Deployment + HorizontalPodAutoscaler
+#
+# Consumes Feature A messages from the features_a exchange.
+# Same competing-consumer pattern as Algorithm A, but on the Feature A queue.
+# Publishes Feature B results to the features_b exchange.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: algorithm-b
+  namespace: audio-processing
+  labels:
+    app: algorithm-b
+    component: processing
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: algorithm-b
+  template:
+    metadata:
+      labels:
+        app: algorithm-b
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+    spec:
+      containers:
+        - name: algorithm-b
+          image: your-registry/algorithm-b:latest
+          imagePullPolicy: Always
+          env:
+            - name: RABBITMQ_HOST
+              value: rabbitmq.audio-processing.svc.cluster.local
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: username
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: INPUT_EXCHANGE
+              value: features_a
+            - name: OUTPUT_EXCHANGE
+              value: features_b
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "512Mi"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: algorithm-b-hpa
+  namespace: audio-processing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: algorithm-b
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

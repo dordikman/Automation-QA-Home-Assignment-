@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(docker:*)",
+      "Bash(docker-compose:*)",
+      "Bash(python:*)",
+      "Bash(grep:*)",
+      "Bash(pytest:*)"
+    ]
+  }
+}

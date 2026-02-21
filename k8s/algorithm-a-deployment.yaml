@@ -1,0 +1,88 @@
+# Algorithm A — Deployment + HorizontalPodAutoscaler
+#
+# Runs multiple pods in a competing-consumer (work queue) configuration.
+# All pods consume from the same audio_stream queue; RabbitMQ delivers
+# each message to exactly one pod, providing natural load balancing.
+# The HPA scales pod count based on CPU to keep pace with sensor throughput.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: algorithm-a
+  namespace: audio-processing
+  labels:
+    app: algorithm-a
+    component: processing
+spec:
+  replicas: 3    # starting replica count; HPA adjusts this dynamically
+  selector:
+    matchLabels:
+      app: algorithm-a
+  template:
+    metadata:
+      labels:
+        app: algorithm-a
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port:   "8080"
+    spec:
+      containers:
+        - name: algorithm-a
+          image: your-registry/algorithm-a:latest
+          imagePullPolicy: Always
+          env:
+            - name: RABBITMQ_HOST
+              value: rabbitmq.audio-processing.svc.cluster.local
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: username
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: AUDIO_QUEUE
+              value: audio_stream
+            - name: FEATURES_EXCHANGE
+              value: features_a
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "512Mi"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: algorithm-a-hpa
+  namespace: audio-processing
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: algorithm-a
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

@@ -1,0 +1,51 @@
+# Reference infrastructure for real-service integration testing.
+#
+# NOTE: This file is NOT required to run the test suite or any Python script
+# in this repository. All tests use the in-memory mock system and run with
+# plain Python and no external services.
+#
+# This file exists to show how real RabbitMQ and PostgreSQL would be
+# provisioned for CI pipelines that test against actual infrastructure
+# (e.g., the GitHub Actions integration-tests job described in design.md).
+#
+# Optional usage (requires Docker)
+# ---------------------------------
+#   docker-compose up -d          # start RabbitMQ + PostgreSQL
+#   docker-compose down -v        # stop and remove volumes
+
+version: "3.8"
+
+services:
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    ports:
+      - "5672:5672"      # AMQP
+      - "15672:15672"    # Management UI — http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-features_db}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qa_password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-qa_user} -d $${POSTGRES_DB:-features_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+volumes:
+  pg_data:
