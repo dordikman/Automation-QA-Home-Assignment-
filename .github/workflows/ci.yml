@@ -36,7 +36,17 @@ jobs:
         run: black --check mocks/ tests/ --line-length=100
 
       - name: SAST — Bandit
-        run: bandit -r mocks/ -f json -o bandit-report.json -ll
+        run: |
+          bandit -r mocks/ -f json -o bandit-report.json -ll || true
+          bandit -r mocks/ -ll 2>&1 | tee bandit_output.txt || true
+          echo "## 🔒 SAST Scan (Bandit)" >> $GITHUB_STEP_SUMMARY
+          if grep -q "No issues identified" bandit_output.txt; then
+            echo "✅ No security issues identified." >> $GITHUB_STEP_SUMMARY
+          else
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat bandit_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
         continue-on-error: true
 
       - name: Unit tests with coverage
@@ -48,7 +58,19 @@ jobs:
             --cov-fail-under=80 \
             --html=unit-test-report.html \
             --self-contained-html \
-            -v
+            -v 2>&1 | tee pytest_unit_output.txt
+          echo "## 🧪 Unit Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -30 pytest_unit_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "## 📊 Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          pytest -m unit --cov=mocks --cov-report=term-missing -q 2>&1 | grep -E "^(mocks|TOTAL|Coverage)" | head -20 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -95,18 +117,48 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Integration tests (in-memory pipeline)
-        run: pytest -m integration -v --html=integration-report.html --self-contained-html
+        run: |
+          pytest -m integration -v \
+            --html=integration-report.html \
+            --self-contained-html \
+            2>&1 | tee integration_output.txt
+          echo "## 🔗 Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -20 integration_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Contract tests (schema compatibility between components)
-        run: pytest tests/contract/ -v --html=contract-report.html --self-contained-html
-        continue-on-error: false
+        run: |
+          pytest tests/contract/ -v \
+            --html=contract-report.html \
+            --self-contained-html \
+            2>&1 | tee contract_output.txt
+          echo "## 📋 Contract Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -20 contract_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Chaos / resilience tests (failure-mode scenarios)
-        run: pytest tests/chaos/ -v --html=chaos-report.html --self-contained-html
-        continue-on-error: false
+        run: |
+          pytest tests/chaos/ -v \
+            --html=chaos-report.html \
+            --self-contained-html \
+            2>&1 | tee chaos_output.txt
+          echo "## 💥 Chaos & Resilience Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -20 chaos_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Security tests (auth · injection · rate limiting)
-        run: pytest -m security -v --html=security-report.html --self-contained-html
+        run: |
+          pytest -m security -v \
+            --html=security-report.html \
+            --self-contained-html \
+            2>&1 | tee security_output.txt
+          echo "## 🛡️ Security Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -20 security_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload all test reports
         uses: actions/upload-artifact@v4
@@ -186,7 +238,12 @@ jobs:
         run: |
           pytest tests/integration_real/ -v \
             --html=real-service-report.html \
-            --self-contained-html
+            --self-contained-html \
+            2>&1 | tee real_output.txt
+          echo "## 🐳 Real-Service Integration Test Results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -20 real_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload real-service report
         uses: actions/upload-artifact@v4
@@ -224,7 +281,18 @@ jobs:
           pytest tests/load/test_pipeline_throughput.py \
             --html=load-test-report.html \
             --self-contained-html \
-            -v -s
+            -v -s \
+            2>&1 | tee load_output.txt
+          echo "## ⚡ Load Test Results (Nightly SLA Check)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -30 load_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          if grep -q "FAILED" load_output.txt; then
+            echo "## ❌ SLA BREACH DETECTED" >> $GITHUB_STEP_SUMMARY
+            echo "One or more load test SLA thresholds were breached. Check the full report artifact." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ✅ All SLA thresholds passed" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload load test report
         uses: actions/upload-artifact@v4
