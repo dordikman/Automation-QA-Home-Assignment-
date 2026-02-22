@@ -278,7 +278,7 @@ jobs:
 
       - name: Run pipeline load tests (SLA-gated)
         run: |
-          pytest tests/load/test_pipeline_throughput.py \
+          pytest tests/load/ \
             --html=load-test-report.html \
             --self-contained-html \
             -v -s \

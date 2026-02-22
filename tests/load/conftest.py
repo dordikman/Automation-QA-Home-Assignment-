@@ -2,7 +2,7 @@
 Fixtures for the load test suite (tests/load/).
 
 This conftest.py is picked up when tests are run explicitly:
-    pytest tests/load/test_pipeline_throughput.py -v -s
+    pytest tests/load/ -v -s
 
 It is NOT auto-collected during a plain `pytest` run because pytest.ini
 sets `norecursedirs = tests/load`.

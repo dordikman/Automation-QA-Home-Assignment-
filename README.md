@@ -40,8 +40,12 @@ A comprehensive test suite for a distributed audio processing pipeline deployed 
 │   ├── security/
 │   │   └── test_api_security.py     # 25 tests — auth failures, injection, rate limiting
 │   ├── load/
-│   │   ├── conftest.py              # Load test fixtures (pipeline with load-sensor)
-│   │   └── test_pipeline_throughput.py  # 16 SLA-gated pytest tests (throughput, latency, backpressure)
+│   │   ├── conftest.py                  # Load test fixtures (pipeline with load-sensor)
+│   │   ├── test_algo_throughput.py      # AlgorithmA throughput + multi-pod scalability (4 tests)
+│   │   ├── test_latency.py              # End-to-end pipeline latency p99 (3 tests)
+│   │   ├── test_datawriter_throughput.py# DataWriter flush rate + idempotency (3 tests)
+│   │   ├── test_api_response_time.py    # REST API p99 + rate-limiter boundary (3 tests)
+│   │   └── test_backpressure.py         # Queue backpressure, no message loss (3 tests)
 │   ├── contract/
 │   │   └── test_message_contracts.py  # Schema contract tests between pipeline components
 │   └── chaos/
@@ -235,7 +239,7 @@ When Docker is **not** running, every test in this directory is automatically sk
 The primary load test suite runs entirely in-process against the in-memory broker — no running server, no Docker, no Locust required. This is what the CI nightly job executes.
 
 ```bash
-pytest tests/load/test_pipeline_throughput.py -v -s
+pytest tests/load/ -v -s
 ```
 
 **What it covers (16 SLA-gated tests):**
@@ -277,7 +281,7 @@ The GitHub Actions workflow in `.github/workflows/ci.yml` runs three stages:
 |---|---|---|
 | **Fast checks** | Every push / PR | Lint (flake8 + black), SAST (Bandit), unit tests, coverage gate (≥ 80%) |
 | **Integration & security** | After fast checks pass | Integration tests, security tests, HTML test report |
-| **Load tests** | Nightly at 02:00 UTC | `pytest tests/load/test_pipeline_throughput.py` — 16 SLA-gated in-process tests (throughput, latency, backpressure); HTML report artifact; Slack alert on SLA breach |
+| **Load tests** | Nightly at 02:00 UTC | `pytest tests/load/` — 16 SLA-gated in-process tests across 5 files (throughput, latency, backpressure); HTML report artifact; Slack alert on SLA breach |
 
 ---
 
