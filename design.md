@@ -515,6 +515,21 @@ The scenarios below describe what each test category covers. Runnable implementa
 
 ## 5. CI/CD Integration
 
+### 5.0 Tool Selection — Why GitHub Actions
+
+| Criterion | GitHub Actions | Jenkins | CircleCI | GitLab CI |
+|---|---|---|---|---|
+| Setup complexity | Zero — native to repo | High — self-hosted server | Low | Low (GitLab only) |
+| Cost for this project | Free (public repo) | Infrastructure cost | Free tier limited | Free tier limited |
+| Docker service containers | ✅ Native support | ✅ With plugins | ✅ | ✅ |
+| Scheduled runs (nightly) | ✅ cron syntax | ✅ | ✅ | ✅ |
+| Artifact storage | ✅ Built-in | ✅ With plugins | ✅ | ✅ |
+| Slack integration | ✅ slackapi/slack-github-action | ✅ | ✅ | ✅ |
+| Secret management | ✅ GitHub Secrets | ✅ Credentials store | ✅ | ✅ |
+| Verdict | ✅ Selected | ❌ Overkill for this scope | ❌ Cost at scale | ❌ Wrong platform |
+
+**Justification:** GitHub Actions was selected because the repository is already hosted on GitHub, making it the zero-friction choice — no additional servers, accounts, or integrations required. The native `services:` block provides real RabbitMQ and PostgreSQL containers for integration tests without any custom Docker orchestration. For an enterprise deployment with on-premise infrastructure requirements, Jenkins would be the appropriate alternative.
+
 ### 5.1 Pipeline Overview
 
 ```mermaid
@@ -632,6 +647,19 @@ jobs:
 | Staging DAST finding | ZAP HTML report as artifact | Slack `#security-alerts` |
 | Load test SLA breach | Locust/pytest HTML report + trend chart | Slack `#performance-alerts` + email |
 | Nightly test failure | Full report in GitHub Actions summary | Slack `#qa-alerts` |
+
+### Test Report Visibility — Where to Find Results
+
+| Report Type | Location in GitHub | How to Access | Available Without Download? |
+|---|---|---|---|
+| Unit test summary | Actions → Run → Summary tab | Automatic — written to $GITHUB_STEP_SUMMARY | ✅ Yes |
+| Coverage % | Actions → Run → Summary tab | Written inline by pytest-cov | ✅ Yes |
+| Full HTML test report | Actions → Run → Artifacts section | Click Download → open .html | ❌ Must download |
+| Bandit SAST findings | Actions → Run → Summary tab | Written inline if issues found | ✅ Yes |
+| Load test SLA result | Actions → Run → Summary tab | PASSED/BREACH written inline | ✅ Yes |
+| Slack alert | #performance-alerts channel | Automatic on nightly SLA breach | ✅ Yes (Slack) |
+
+**Report Access Flow:**
 
 ---
 
