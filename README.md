@@ -40,7 +40,8 @@ A comprehensive test suite for a distributed audio processing pipeline deployed 
 │   ├── security/
 │   │   └── test_api_security.py     # 25 tests — auth failures, injection, rate limiting
 │   ├── load/
-│   │   └── test_load.py            # Locust script with SLA assertions
+│   │   ├── conftest.py              # Load test fixtures (pipeline with load-sensor)
+│   │   └── test_pipeline_throughput.py  # 16 SLA-gated pytest tests (throughput, latency, backpressure)
 │   ├── contract/
 │   │   └── test_message_contracts.py  # Schema contract tests between pipeline components
 │   └── chaos/
@@ -229,11 +230,34 @@ When Docker is **not** running, every test in this directory is automatically sk
 
 ---
 
-## Running the Load Test (Locust)
+## Running the In-Process Load Tests (pytest)
 
-The load test requires the mock REST API to be running as a live HTTP server.
+The primary load test suite runs entirely in-process against the in-memory broker — no running server, no Docker, no Locust required. This is what the CI nightly job executes.
 
-**Step 1 — Start the mock server**
+```bash
+pytest tests/load/test_pipeline_throughput.py -v -s
+```
+
+**What it covers (16 SLA-gated tests):**
+
+| Class | What is measured | SLA threshold |
+|---|---|---|
+| `TestAudioQueueThroughput` | AlgorithmA single-pod drain rate | ≥ 100 msgs/sec |
+| `TestMultiPodScalability` | 2- and 3-pod competing consumers, no loss/duplication | 0 dropped, 0 duplicates |
+| `TestEndToEndPipelineLatency` | Sensor → DB wall-clock time | p99 ≤ 2 000 ms |
+| `TestDataWriterThroughput` | `flush()` rate and idempotency at 1 000 features | ≥ 50 features/sec |
+| `TestRestApiResponseTime` | REST API sequential latency incl. rate-limiter check | p99 ≤ 500 ms |
+| `TestQueueBackpressure` | Burst of 1 000 messages — zero message loss | 0 dropped |
+
+The job exits non-zero if any SLA threshold is breached, triggering a Slack alert in CI.
+
+---
+
+## Running the Mock Server (for external load testing)
+
+`run_mock_server.py` launches the full mock pipeline as a live HTTP server for use with external load tools such as Locust or k6.
+
+**Start the mock server**
 
 ```bash
 python run_mock_server.py
@@ -241,30 +265,7 @@ python run_mock_server.py
 
 This starts background threads simulating sensors, Algorithm A/B pods, and DataWriter, then launches Flask on `http://localhost:5000`.
 
-**Step 2 — Run Locust (interactive UI)**
-
-```bash
-locust -f tests/load/test_load.py --host=http://localhost:5000
-```
-
-Open `http://localhost:8089` in your browser, set the number of users and spawn rate, and start the test.
-
-**Step 3 — Run Locust (headless / CI mode)**
-
-```bash
-locust -f tests/load/test_load.py \
-       --host=http://localhost:5000 \
-       --headless \
-       -u 500 -r 50 \
-       --run-time 5m \
-       --html tests/load/report.html
-```
-
-The script asserts SLA thresholds at the end of the run:
-- **p99 response time < 500 ms**
-- **Error rate < 1%**
-
-A non-zero exit code is returned if either threshold is breached — this integrates cleanly with CI.
+Point any HTTP load tool at `http://localhost:5000` with a valid `Authorization: Bearer test-token` header to exercise the live endpoints.
 
 ---
 
@@ -276,7 +277,7 @@ The GitHub Actions workflow in `.github/workflows/ci.yml` runs three stages:
 |---|---|---|
 | **Fast checks** | Every push / PR | Lint (flake8 + black), SAST (Bandit), unit tests, coverage gate (≥ 80%) |
 | **Integration & security** | After fast checks pass | Integration tests, security tests, HTML test report |
-| **Load tests** | Nightly at 02:00 UTC | Locust headless run (100 users, 2 min), SLA assertion, Slack alert on breach |
+| **Load tests** | Nightly at 02:00 UTC | `pytest tests/load/test_pipeline_throughput.py` — 16 SLA-gated in-process tests (throughput, latency, backpressure); HTML report artifact; Slack alert on SLA breach |
 
 ---
 
